@@ -24,6 +24,7 @@ from .models import (
     Proxy,
     CpaService,
     Sub2ApiService,
+    TokenSoloService,
     BindCardTask,
     TeamInviteRecord,
     OperationAuditLog,
@@ -1067,6 +1068,74 @@ def update_tm_service(db: Session, service_id: int, **kwargs):
 def delete_tm_service(db: Session, service_id: int) -> bool:
     """删除 Team Manager 服务配置"""
     svc = get_tm_service_by_id(db, service_id)
+    if not svc:
+        return False
+    db.delete(svc)
+    db.commit()
+    return True
+
+
+# ============================================================================
+# TokenSolo 服务 CRUD
+# ============================================================================
+
+def create_tokensolo_service(
+    db: Session,
+    name: str,
+    api_url: str,
+    import_secret: str,
+    channel: str = "codex",
+    account_type: str = "codex",
+    models: str = "gpt-5.4",
+    enabled: bool = True,
+    priority: int = 0,
+) -> TokenSoloService:
+    """创建 TokenSolo 服务配置"""
+    svc = TokenSoloService(
+        name=name,
+        api_url=api_url,
+        import_secret=import_secret,
+        channel=channel,
+        account_type=account_type,
+        models=models,
+        enabled=enabled,
+        priority=priority,
+    )
+    db.add(svc)
+    db.commit()
+    db.refresh(svc)
+    return svc
+
+
+def get_tokensolo_service_by_id(db: Session, service_id: int) -> Optional[TokenSoloService]:
+    """按 ID 获取 TokenSolo 服务"""
+    return db.query(TokenSoloService).filter(TokenSoloService.id == service_id).first()
+
+
+def get_tokensolo_services(db: Session, enabled: Optional[bool] = None) -> List[TokenSoloService]:
+    """获取 TokenSolo 服务列表"""
+    query = db.query(TokenSoloService)
+    if enabled is not None:
+        query = query.filter(TokenSoloService.enabled == enabled)
+    return query.order_by(asc(TokenSoloService.priority), asc(TokenSoloService.id)).all()
+
+
+def update_tokensolo_service(db: Session, service_id: int, **kwargs) -> Optional[TokenSoloService]:
+    """更新 TokenSolo 服务配置"""
+    svc = get_tokensolo_service_by_id(db, service_id)
+    if not svc:
+        return None
+    for key, value in kwargs.items():
+        if hasattr(svc, key):
+            setattr(svc, key, value)
+    db.commit()
+    db.refresh(svc)
+    return svc
+
+
+def delete_tokensolo_service(db: Session, service_id: int) -> bool:
+    """删除 TokenSolo 服务配置"""
+    svc = get_tokensolo_service_by_id(db, service_id)
     if not svc:
         return False
     db.delete(svc)

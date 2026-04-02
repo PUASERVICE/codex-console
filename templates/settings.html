@@ -277,7 +277,7 @@ user:pass@127.0.0.1:7890
                 </div>
             </div>
 
-            <!-- 上传服务设置（CPA + Sub2API + Team Manager） -->
+            <!-- 上传服务设置（CPA + Sub2API + Team Manager + TokenSolo） -->
             <div class="tab-content" id="upload-tab">
                 <!-- CPA 服务管理 -->
                 <div class="card" style="margin-top: var(--spacing-lg);">
@@ -356,6 +356,95 @@ user:pass@127.0.0.1:7890
                                 </tbody>
                             </table>
                         </div>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top: var(--spacing-lg);">
+                    <div class="card-header">
+                        <h3>🪙 TokenSolo 服务</h3>
+                        <button class="btn btn-primary btn-sm" id="add-tokensolo-service-btn">+ 添加服务</button>
+                    </div>
+                    <div class="card-body" style="padding: 0;">
+                        <div style="padding: 12px 16px; color: var(--text-muted); font-size: 0.9rem; border-bottom: 1px solid var(--border-color);">
+                            固定请求头为 <code>X-Codex-Import-Secret</code>，默认渠道 <code>codex</code>，默认模型 <code>gpt-5.4</code>。
+                        </div>
+                        <div class="table-container">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width:150px;">名称</th>
+                                        <th>API URL</th>
+                                        <th style="width:100px;">频道</th>
+                                        <th style="width:140px;">模型</th>
+                                        <th style="width:80px;">状态</th>
+                                        <th style="width:60px;text-align:center;">优先级</th>
+                                        <th style="width:220px;">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tokensolo-services-table">
+                                    <tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px;">加载中...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal" id="tokensolo-service-edit-modal">
+                <div class="modal-content" style="max-width: 560px;">
+                    <div class="modal-header">
+                        <h3 id="tokensolo-service-modal-title">添加 TokenSolo 服务</h3>
+                        <button class="modal-close" id="close-tokensolo-service-modal">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <form id="tokensolo-service-form">
+                            <input type="hidden" id="tokensolo-service-id">
+                            <div class="form-group">
+                                <label for="tokensolo-service-name">名称 *</label>
+                                <input type="text" id="tokensolo-service-name" placeholder="例如: TokenSolo 主服务" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="tokensolo-service-url">API URL *</label>
+                                <input type="text" id="tokensolo-service-url" value="https://tokensolo.com/api/channel/codex/import" required>
+                                <p class="hint">支持直接填写完整导入地址，也支持只填域名，系统会自动补全 <code>/api/channel/{channel}/import</code></p>
+                            </div>
+                            <div class="form-group">
+                                <label for="tokensolo-service-secret">Import Secret</label>
+                                <input type="password" id="tokensolo-service-secret" placeholder="编辑时留空则保持原值" autocomplete="new-password">
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="tokensolo-service-channel">频道</label>
+                                    <input type="text" id="tokensolo-service-channel" value="codex">
+                                </div>
+                                <div class="form-group">
+                                    <label for="tokensolo-service-account-type">类型</label>
+                                    <input type="text" id="tokensolo-service-account-type" value="codex">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="tokensolo-service-models">模型列表</label>
+                                <input type="text" id="tokensolo-service-models" value="gpt-5.4" placeholder="多个模型用逗号分隔">
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="tokensolo-service-priority">优先级</label>
+                                    <input type="number" id="tokensolo-service-priority" value="0" min="0">
+                                    <p class="hint">数字越小优先级越高</p>
+                                </div>
+                                <div class="form-group">
+                                    <label>&nbsp;</label>
+                                    <label style="margin-top:10px;display:flex;align-items:center;gap:8px;">
+                                        <input type="checkbox" id="tokensolo-service-enabled" checked> 启用
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-primary">💾 保存</button>
+                                <button type="button" class="btn btn-secondary" id="test-tokensolo-service-btn">🔌 测试连接</button>
+                                <button type="button" class="btn btn-secondary" id="cancel-tokensolo-service-btn">取消</button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             </div>
@@ -676,6 +765,5 @@ user:pass@127.0.0.1:7890
     <script src="/static/js/settings.js?v={{ static_version }}"></script>
 </body>
 </html>
-
 
 

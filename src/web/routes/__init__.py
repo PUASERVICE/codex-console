@@ -14,6 +14,7 @@ from .selfcheck import router as selfcheck_router
 from .upload.cpa_services import router as cpa_services_router
 from .upload.sub2api_services import router as sub2api_services_router
 from .upload.tm_services import router as tm_services_router
+from .upload.tokensolo_services import router as tokensolo_services_router
 from .auto_team import router as auto_team_router
 from .tasks import router as tasks_router
 
@@ -30,5 +31,6 @@ api_router.include_router(selfcheck_router, prefix="/selfcheck", tags=["selfchec
 api_router.include_router(cpa_services_router, prefix="/cpa-services", tags=["cpa-services"])
 api_router.include_router(sub2api_services_router, prefix="/sub2api-services", tags=["sub2api-services"])
 api_router.include_router(tm_services_router, prefix="/tm-services", tags=["tm-services"])
+api_router.include_router(tokensolo_services_router, prefix="/tokensolo-services", tags=["tokensolo-services"])
 api_router.include_router(auto_team_router, prefix="/auto-team", tags=["auto-team"])
 api_router.include_router(tasks_router, prefix="/tasks", tags=["tasks"])

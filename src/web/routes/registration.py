@@ -254,6 +254,8 @@ class RegistrationTaskCreate(BaseModel):
     sub2api_service_ids: List[int] = []  # 指定 Sub2API 服务 ID 列表
     auto_upload_tm: bool = False
     tm_service_ids: List[int] = []  # 指定 TM 服务 ID 列表
+    auto_upload_tokensolo: bool = False
+    tokensolo_service_ids: List[int] = []
     registration_type: str = RoleTag.CHILD.value  # none / parent / child
 
 
@@ -274,6 +276,8 @@ class BatchRegistrationRequest(BaseModel):
     sub2api_service_ids: List[int] = []
     auto_upload_tm: bool = False
     tm_service_ids: List[int] = []
+    auto_upload_tokensolo: bool = False
+    tokensolo_service_ids: List[int] = []
     registration_type: str = RoleTag.CHILD.value  # none / parent / child
 
     @field_validator("count", mode="before")
@@ -373,6 +377,8 @@ class OutlookBatchRegistrationRequest(BaseModel):
     sub2api_service_ids: List[int] = []
     auto_upload_tm: bool = False
     tm_service_ids: List[int] = []
+    auto_upload_tokensolo: bool = False
+    tokensolo_service_ids: List[int] = []
     registration_type: str = RoleTag.CHILD.value  # none / parent / child
 
 
@@ -740,7 +746,7 @@ def _report_dynamic_proxy_result_if_needed(
     except Exception as exc:
         logger.warning("任务 %s 动态代理结果上报失败: %s", task_uuid, exc)
 
-def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: Optional[str], email_service_config: Optional[dict], email_service_id: Optional[int] = None, log_prefix: str = "", batch_id: str = "", auto_upload_cpa: bool = False, cpa_service_ids: List[int] = None, auto_upload_sub2api: bool = False, sub2api_service_ids: List[int] = None, auto_upload_tm: bool = False, tm_service_ids: List[int] = None, batch_wait_slice_seconds: Optional[int] = None, registration_type: str = RoleTag.CHILD.value):
+def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: Optional[str], email_service_config: Optional[dict], email_service_id: Optional[int] = None, log_prefix: str = "", batch_id: str = "", auto_upload_cpa: bool = False, cpa_service_ids: List[int] = None, auto_upload_sub2api: bool = False, sub2api_service_ids: List[int] = None, auto_upload_tm: bool = False, tm_service_ids: List[int] = None, auto_upload_tokensolo: bool = False, tokensolo_service_ids: List[int] = None, batch_wait_slice_seconds: Optional[int] = None, registration_type: str = RoleTag.CHILD.value):
     """
     在线程池中执行的同步注册任务
 
@@ -1054,6 +1060,38 @@ def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: 
                     except Exception as tm_err:
                         log_callback(f"[TM] 上传异常: {tm_err}")
 
+                # 自动上传到 TokenSolo（可多服务）
+                if auto_upload_tokensolo:
+                    try:
+                        from ...core.upload.tokensolo_upload import upload_to_tokensolo
+                        from ...database.models import Account as AccountModel
+                        saved_account = db.query(AccountModel).filter_by(email=result.email).first()
+                        if saved_account and saved_account.access_token:
+                            _tokensolo_ids = tokensolo_service_ids or []
+                            if not _tokensolo_ids:
+                                _tokensolo_ids = [s.id for s in crud.get_tokensolo_services(db, enabled=True)]
+                            if not _tokensolo_ids:
+                                log_callback("[TokenSolo] 无可用 TokenSolo 服务，跳过上传")
+                            for _sid in _tokensolo_ids:
+                                try:
+                                    _svc = crud.get_tokensolo_service_by_id(db, _sid)
+                                    if not _svc:
+                                        continue
+                                    log_callback(f"[TokenSolo] 正在把账号发往服务站: {_svc.name}")
+                                    _ok, _msg = upload_to_tokensolo(
+                                        [saved_account],
+                                        api_url=_svc.api_url,
+                                        import_secret=_svc.import_secret,
+                                        channel=_svc.channel or "codex",
+                                        account_type=_svc.account_type or "codex",
+                                        models=_svc.models or "gpt-5.4",
+                                    )
+                                    log_callback(f"[TokenSolo] {'成功' if _ok else '失败'}({_svc.name}): {_msg}")
+                                except Exception as _e:
+                                    log_callback(f"[TokenSolo] 异常({_sid}): {_e}")
+                    except Exception as tokensolo_err:
+                        log_callback(f"[TokenSolo] 上传异常: {tokensolo_err}")
+
                 # 更新任务状态
                 crud.update_registration_task(
                     db, task_uuid,
@@ -1161,7 +1199,7 @@ def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: 
             return _make_task_execution_outcome("failed", error=str(e))
 
 
-async def run_registration_task(task_uuid: str, email_service_type: str, proxy: Optional[str], email_service_config: Optional[dict], email_service_id: Optional[int] = None, log_prefix: str = "", batch_id: str = "", auto_upload_cpa: bool = False, cpa_service_ids: List[int] = None, auto_upload_sub2api: bool = False, sub2api_service_ids: List[int] = None, auto_upload_tm: bool = False, tm_service_ids: List[int] = None, batch_wait_slice_seconds: Optional[int] = None, registration_type: str = RoleTag.CHILD.value):
+async def run_registration_task(task_uuid: str, email_service_type: str, proxy: Optional[str], email_service_config: Optional[dict], email_service_id: Optional[int] = None, log_prefix: str = "", batch_id: str = "", auto_upload_cpa: bool = False, cpa_service_ids: List[int] = None, auto_upload_sub2api: bool = False, sub2api_service_ids: List[int] = None, auto_upload_tm: bool = False, tm_service_ids: List[int] = None, auto_upload_tokensolo: bool = False, tokensolo_service_ids: List[int] = None, batch_wait_slice_seconds: Optional[int] = None, registration_type: str = RoleTag.CHILD.value):
     """
     异步执行注册任务
 
@@ -1198,6 +1236,8 @@ async def run_registration_task(task_uuid: str, email_service_type: str, proxy: 
             sub2api_service_ids or [],
             auto_upload_tm,
             tm_service_ids or [],
+            auto_upload_tokensolo,
+            tokensolo_service_ids or [],
             batch_wait_slice_seconds,
             registration_type,
         )
@@ -1275,6 +1315,8 @@ async def run_batch_parallel(
     sub2api_service_ids: List[int] = None,
     auto_upload_tm: bool = False,
     tm_service_ids: List[int] = None,
+    auto_upload_tokensolo: bool = False,
+    tokensolo_service_ids: List[int] = None,
     registration_type: str = RoleTag.CHILD.value,
 ):
     """
@@ -1297,9 +1339,10 @@ async def run_batch_parallel(
                     auto_upload_cpa=auto_upload_cpa, cpa_service_ids=cpa_service_ids or [],
                     auto_upload_sub2api=auto_upload_sub2api, sub2api_service_ids=sub2api_service_ids or [],
                     auto_upload_tm=auto_upload_tm, tm_service_ids=tm_service_ids or [],
+                    auto_upload_tokensolo=auto_upload_tokensolo, tokensolo_service_ids=tokensolo_service_ids or [],
                     batch_wait_slice_seconds=BATCH_OTP_WAIT_SLICE_SECONDS,
-                registration_type=registration_type,
-            )
+                    registration_type=registration_type,
+                )
 
             status = str((outcome or {}).get("outcome") or "")
             if status == "deferred" and defer_count < BATCH_OTP_WAIT_MAX_DEFERS and not task_manager.is_batch_cancelled(batch_id):
@@ -1390,6 +1433,8 @@ async def run_batch_pipeline(
     sub2api_service_ids: List[int] = None,
     auto_upload_tm: bool = False,
     tm_service_ids: List[int] = None,
+    auto_upload_tokensolo: bool = False,
+    tokensolo_service_ids: List[int] = None,
     registration_type: str = RoleTag.CHILD.value,
 ):
     """
@@ -1413,9 +1458,10 @@ async def run_batch_pipeline(
                         auto_upload_cpa=auto_upload_cpa, cpa_service_ids=cpa_service_ids or [],
                         auto_upload_sub2api=auto_upload_sub2api, sub2api_service_ids=sub2api_service_ids or [],
                         auto_upload_tm=auto_upload_tm, tm_service_ids=tm_service_ids or [],
+                        auto_upload_tokensolo=auto_upload_tokensolo, tokensolo_service_ids=tokensolo_service_ids or [],
                         batch_wait_slice_seconds=BATCH_OTP_WAIT_SLICE_SECONDS,
-                registration_type=registration_type,
-            )
+                        registration_type=registration_type,
+                    )
 
                 status = str((outcome or {}).get("outcome") or "")
                 if status == "deferred" and defer_count < BATCH_OTP_WAIT_MAX_DEFERS and not task_manager.is_batch_cancelled(batch_id):
@@ -1528,6 +1574,8 @@ async def run_batch_registration(
     sub2api_service_ids: List[int] = None,
     auto_upload_tm: bool = False,
     tm_service_ids: List[int] = None,
+    auto_upload_tokensolo: bool = False,
+    tokensolo_service_ids: List[int] = None,
     registration_type: str = RoleTag.CHILD.value,
 ):
     """根据 mode 分发到并行或流水线执行"""
@@ -1538,6 +1586,7 @@ async def run_batch_registration(
             auto_upload_cpa=auto_upload_cpa, cpa_service_ids=cpa_service_ids,
             auto_upload_sub2api=auto_upload_sub2api, sub2api_service_ids=sub2api_service_ids,
             auto_upload_tm=auto_upload_tm, tm_service_ids=tm_service_ids,
+            auto_upload_tokensolo=auto_upload_tokensolo, tokensolo_service_ids=tokensolo_service_ids,
             registration_type=registration_type,
         )
     else:
@@ -1548,6 +1597,7 @@ async def run_batch_registration(
             auto_upload_cpa=auto_upload_cpa, cpa_service_ids=cpa_service_ids,
             auto_upload_sub2api=auto_upload_sub2api, sub2api_service_ids=sub2api_service_ids,
             auto_upload_tm=auto_upload_tm, tm_service_ids=tm_service_ids,
+            auto_upload_tokensolo=auto_upload_tokensolo, tokensolo_service_ids=tokensolo_service_ids,
             registration_type=registration_type,
         )
 
@@ -1601,6 +1651,8 @@ async def start_registration(
         request.sub2api_service_ids,
         request.auto_upload_tm,
         request.tm_service_ids,
+        request.auto_upload_tokensolo,
+        request.tokensolo_service_ids,
         None,
         request.registration_type,
     )
@@ -1694,6 +1746,8 @@ async def start_batch_registration(
         request.sub2api_service_ids,
         request.auto_upload_tm,
         request.tm_service_ids,
+        request.auto_upload_tokensolo,
+        request.tokensolo_service_ids,
         request.registration_type,
     )
 
@@ -2186,6 +2240,8 @@ async def run_outlook_batch_registration(
     sub2api_service_ids: List[int] = None,
     auto_upload_tm: bool = False,
     tm_service_ids: List[int] = None,
+    auto_upload_tokensolo: bool = False,
+    tokensolo_service_ids: List[int] = None,
     registration_type: str = RoleTag.CHILD.value,
 ):
     """
@@ -2231,6 +2287,8 @@ async def run_outlook_batch_registration(
         sub2api_service_ids=sub2api_service_ids,
         auto_upload_tm=auto_upload_tm,
         tm_service_ids=tm_service_ids,
+        auto_upload_tokensolo=auto_upload_tokensolo,
+        tokensolo_service_ids=tokensolo_service_ids,
         registration_type=registration_type,
     )
 
@@ -2361,6 +2419,8 @@ async def start_outlook_batch_registration(
         request.sub2api_service_ids,
         request.auto_upload_tm,
         request.tm_service_ids,
+        request.auto_upload_tokensolo,
+        request.tokensolo_service_ids,
         request.registration_type,
     )
 

@@ -75,6 +75,15 @@ const elements = {
     tmServiceForm: document.getElementById('tm-service-form'),
     tmServiceModalTitle: document.getElementById('tm-service-modal-title'),
     testTmServiceBtn: document.getElementById('test-tm-service-btn'),
+    // TokenSolo 服务管理
+    addTokenSoloServiceBtn: document.getElementById('add-tokensolo-service-btn'),
+    tokenSoloServicesTable: document.getElementById('tokensolo-services-table'),
+    tokenSoloServiceEditModal: document.getElementById('tokensolo-service-edit-modal'),
+    closeTokenSoloServiceModal: document.getElementById('close-tokensolo-service-modal'),
+    cancelTokenSoloServiceBtn: document.getElementById('cancel-tokensolo-service-btn'),
+    tokenSoloServiceForm: document.getElementById('tokensolo-service-form'),
+    tokenSoloServiceModalTitle: document.getElementById('tokensolo-service-modal-title'),
+    testTokenSoloServiceBtn: document.getElementById('test-tokensolo-service-btn'),
     // 验证码设置
     emailCodeForm: document.getElementById('email-code-form'),
     // Outlook 设置
@@ -96,6 +105,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadCpaServices();
     loadSub2ApiServices();
     loadTmServices();
+    loadTokenSoloServices();
     initEventListeners();
 });
 
@@ -303,6 +313,28 @@ function initEventListeners() {
     }
     if (elements.testTmServiceBtn) {
         elements.testTmServiceBtn.addEventListener('click', handleTestTmService);
+    }
+
+    // TokenSolo 服务管理
+    if (elements.addTokenSoloServiceBtn) {
+        elements.addTokenSoloServiceBtn.addEventListener('click', () => openTokenSoloServiceModal());
+    }
+    if (elements.closeTokenSoloServiceModal) {
+        elements.closeTokenSoloServiceModal.addEventListener('click', closeTokenSoloServiceModal);
+    }
+    if (elements.cancelTokenSoloServiceBtn) {
+        elements.cancelTokenSoloServiceBtn.addEventListener('click', closeTokenSoloServiceModal);
+    }
+    if (elements.tokenSoloServiceEditModal) {
+        elements.tokenSoloServiceEditModal.addEventListener('click', (e) => {
+            if (e.target === elements.tokenSoloServiceEditModal) closeTokenSoloServiceModal();
+        });
+    }
+    if (elements.tokenSoloServiceForm) {
+        elements.tokenSoloServiceForm.addEventListener('submit', handleSaveTokenSoloService);
+    }
+    if (elements.testTokenSoloServiceBtn) {
+        elements.testTokenSoloServiceBtn.addEventListener('click', handleTestTokenSoloService);
     }
 
     // CPA 服务管理
@@ -1410,6 +1442,176 @@ async function handleTestTmService() {
     } finally {
         elements.testTmServiceBtn.disabled = false;
         elements.testTmServiceBtn.textContent = '🔌 测试连接';
+    }
+}
+
+
+// ============== TokenSolo 服务管理 ==============
+
+async function loadTokenSoloServices() {
+    if (!elements.tokenSoloServicesTable) return;
+    try {
+        const services = await api.get('/tokensolo-services');
+        renderTokenSoloServicesTable(services);
+    } catch (e) {
+        elements.tokenSoloServicesTable.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--danger-color);">${e.message}</td></tr>`;
+    }
+}
+
+function renderTokenSoloServicesTable(services) {
+    if (!services || services.length === 0) {
+        elements.tokenSoloServicesTable.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px;">暂无 TokenSolo 服务，点击「添加服务」新增</td></tr>';
+        return;
+    }
+    elements.tokenSoloServicesTable.innerHTML = services.map(s => `
+        <tr>
+            <td>${escapeHtml(s.name)}</td>
+            <td style="font-size:0.85rem;color:var(--text-muted);">${escapeHtml(s.api_url)}</td>
+            <td style="text-align:center;">${escapeHtml(s.channel || 'codex')}</td>
+            <td style="text-align:center;">${escapeHtml((s.models || []).join(', '))}</td>
+            <td style="text-align:center;" title="${s.enabled ? '已启用' : '已禁用'}">${s.enabled ? '✅' : '⭕'}</td>
+            <td style="text-align:center;">${s.priority}</td>
+            <td style="white-space:nowrap;">
+                <button class="btn btn-secondary btn-sm" onclick="editTokenSoloService(${s.id})">编辑</button>
+                <button class="btn btn-secondary btn-sm" onclick="testTokenSoloServiceById(${s.id})">测试</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteTokenSoloService(${s.id}, '${escapeHtml(s.name)}')">删除</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function openTokenSoloServiceModal(service = null) {
+    document.getElementById('tokensolo-service-id').value = service ? service.id : '';
+    document.getElementById('tokensolo-service-name').value = service ? service.name : '';
+    document.getElementById('tokensolo-service-url').value = service ? service.api_url : 'https://tokensolo.com/api/channel/codex/import';
+    document.getElementById('tokensolo-service-secret').value = '';
+    document.getElementById('tokensolo-service-channel').value = service ? (service.channel || 'codex') : 'codex';
+    document.getElementById('tokensolo-service-account-type').value = service ? (service.account_type || 'codex') : 'codex';
+    document.getElementById('tokensolo-service-models').value = service ? ((service.models || []).join(', ')) : 'gpt-5.4';
+    document.getElementById('tokensolo-service-priority').value = service ? service.priority : 0;
+    document.getElementById('tokensolo-service-enabled').checked = service ? service.enabled : true;
+    document.getElementById('tokensolo-service-secret').placeholder = service && service.has_secret ? '已配置，留空保持不变' : '请输入 Import Secret';
+    elements.tokenSoloServiceModalTitle.textContent = service ? '编辑 TokenSolo 服务' : '添加 TokenSolo 服务';
+    elements.tokenSoloServiceEditModal.classList.add('active');
+}
+
+function closeTokenSoloServiceModal() {
+    elements.tokenSoloServiceEditModal.classList.remove('active');
+}
+
+async function editTokenSoloService(id) {
+    try {
+        const service = await api.get(`/tokensolo-services/${id}`);
+        openTokenSoloServiceModal(service);
+    } catch (e) {
+        toast.error('获取服务信息失败: ' + e.message);
+    }
+}
+
+async function handleSaveTokenSoloService(e) {
+    e.preventDefault();
+    const id = document.getElementById('tokensolo-service-id').value;
+    const name = document.getElementById('tokensolo-service-name').value.trim();
+    const apiUrl = document.getElementById('tokensolo-service-url').value.trim();
+    const importSecret = document.getElementById('tokensolo-service-secret').value.trim();
+    const channel = document.getElementById('tokensolo-service-channel').value.trim() || 'codex';
+    const accountType = document.getElementById('tokensolo-service-account-type').value.trim() || 'codex';
+    const models = document.getElementById('tokensolo-service-models').value.trim() || 'gpt-5.4';
+    const priority = parseInt(document.getElementById('tokensolo-service-priority').value) || 0;
+    const enabled = document.getElementById('tokensolo-service-enabled').checked;
+
+    if (!name || !apiUrl) {
+        toast.error('名称和 API URL 不能为空');
+        return;
+    }
+    if (!id && !importSecret) {
+        toast.error('新增服务时 Import Secret 不能为空');
+        return;
+    }
+
+    try {
+        const payload = { name, api_url: apiUrl, channel, account_type: accountType, models, priority, enabled };
+        if (importSecret) payload.import_secret = importSecret;
+
+        if (id) {
+            await api.patch(`/tokensolo-services/${id}`, payload);
+            toast.success('服务已更新');
+        } else {
+            payload.import_secret = importSecret;
+            await api.post('/tokensolo-services', payload);
+            toast.success('服务已添加');
+        }
+        closeTokenSoloServiceModal();
+        loadTokenSoloServices();
+    } catch (e) {
+        toast.error('保存失败: ' + e.message);
+    }
+}
+
+async function deleteTokenSoloService(id, name) {
+    const confirmed = await confirm(`确定要删除 TokenSolo 服务「${name}」吗？`);
+    if (!confirmed) return;
+    try {
+        await api.delete(`/tokensolo-services/${id}`);
+        toast.success('已删除');
+        loadTokenSoloServices();
+    } catch (e) {
+        toast.error('删除失败: ' + e.message);
+    }
+}
+
+async function testTokenSoloServiceById(id) {
+    try {
+        const result = await api.post(`/tokensolo-services/${id}/test`);
+        if (result.success) {
+            toast.success(result.message);
+        } else {
+            toast.error(result.message);
+        }
+    } catch (e) {
+        toast.error('测试失败: ' + e.message);
+    }
+}
+
+async function handleTestTokenSoloService() {
+    const apiUrl = document.getElementById('tokensolo-service-url').value.trim();
+    const importSecret = document.getElementById('tokensolo-service-secret').value.trim();
+    const channel = document.getElementById('tokensolo-service-channel').value.trim() || 'codex';
+    const id = document.getElementById('tokensolo-service-id').value;
+
+    if (!apiUrl) {
+        toast.error('请先填写 API URL');
+        return;
+    }
+    if (!id && !importSecret) {
+        toast.error('请先填写 Import Secret');
+        return;
+    }
+
+    elements.testTokenSoloServiceBtn.disabled = true;
+    elements.testTokenSoloServiceBtn.textContent = '测试中...';
+
+    try {
+        let result;
+        if (id && !importSecret) {
+            result = await api.post(`/tokensolo-services/${id}/test`);
+        } else {
+            result = await api.post('/tokensolo-services/test-connection', {
+                api_url: apiUrl,
+                import_secret: importSecret,
+                channel,
+            });
+        }
+        if (result.success) {
+            toast.success(result.message);
+        } else {
+            toast.error(result.message);
+        }
+    } catch (e) {
+        toast.error('测试失败: ' + e.message);
+    } finally {
+        elements.testTokenSoloServiceBtn.disabled = false;
+        elements.testTokenSoloServiceBtn.textContent = '🔌 测试连接';
     }
 }
 

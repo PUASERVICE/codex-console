@@ -100,10 +100,17 @@ def test_fetch_dynamic_proxy_upgrades_socks5_scheme(monkeypatch):
     assert proxy_url == "socks5h://127.0.0.1:1080"
 
 
-def test_probe_proxy_connectivity_accepts_openai_reachable_status(monkeypatch):
+def test_probe_proxy_connectivity_returns_exit_ip(monkeypatch):
     class DummyResponse:
-        def __init__(self, status_code):
+        def __init__(self, status_code, payload=None, text=""):
             self.status_code = status_code
+            self._payload = payload
+            self.text = text
+
+        def json(self):
+            if self._payload is None:
+                raise ValueError("no json")
+            return self._payload
 
     calls = []
 
@@ -111,9 +118,8 @@ def test_probe_proxy_connectivity_accepts_openai_reachable_status(monkeypatch):
         @staticmethod
         def get(url, **kwargs):
             calls.append((url, kwargs))
-            if url == "https://chatgpt.com/backend-api/me":
-                return DummyResponse(401)
-            raise AssertionError(f"unexpected url: {url}")
+            assert url == "https://api.ipify.org?format=json"
+            return DummyResponse(200, payload={"ip": "1.2.3.4"})
 
     import sys
 
@@ -122,6 +128,11 @@ def test_probe_proxy_connectivity_accepts_openai_reachable_status(monkeypatch):
     result = settings_routes._probe_proxy_connectivity("socks5://127.0.0.1:1080", timeout_seconds=2)
 
     assert result["success"] is True
-    assert result["status_code"] == 401
+    assert result["status_code"] == 200
+    assert result["ip"] == "1.2.3.4"
     assert result["proxy_url"] == "socks5h://127.0.0.1:1080"
-    assert calls[0][1]["proxy"] == "socks5h://127.0.0.1:1080"
+    assert result["message"] == "代理连接成功，出口 IP: 1.2.3.4"
+    assert calls[0][1]["proxies"] == {
+        "http": "socks5h://127.0.0.1:1080",
+        "https": "socks5h://127.0.0.1:1080",
+    }

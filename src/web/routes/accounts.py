@@ -37,6 +37,7 @@ from ...core.openai.token_refresh import validate_account_token as do_validate
 from ...core.upload.cpa_upload import generate_token_json, batch_upload_to_cpa, upload_to_cpa
 from ...core.upload.team_manager_upload import upload_to_team_manager, batch_upload_to_team_manager
 from ...core.upload.sub2api_upload import batch_upload_to_sub2api, upload_to_sub2api
+from ...core.upload.tokensolo_upload import batch_upload_to_tokensolo, upload_to_tokensolo
 
 from ...core.dynamic_proxy import get_proxy_url_for_task
 from ...database import crud
@@ -3870,6 +3871,19 @@ class BatchUploadTMRequest(BaseModel):
     service_id: Optional[int] = None
 
 
+class UploadTokenSoloRequest(BaseModel):
+    service_id: Optional[int] = None
+
+
+class BatchUploadTokenSoloRequest(BaseModel):
+    ids: List[int] = []
+    select_all: bool = False
+    status_filter: Optional[str] = None
+    email_service_filter: Optional[str] = None
+    search_filter: Optional[str] = None
+    service_id: Optional[int] = None
+
+
 @router.post("/batch-upload-tm")
 async def batch_upload_accounts_to_tm(request: BatchUploadTMRequest):
     """批量上传账号到 Team Manager"""
@@ -3921,6 +3935,77 @@ async def upload_account_to_tm(account_id: int, request: Optional[UploadTMReques
         success, message = upload_to_team_manager(account, api_url, api_key)
 
     return {"success": success, "message": message}
+
+
+@router.post("/batch-upload-tokensolo")
+async def batch_upload_accounts_to_tokensolo(request: BatchUploadTokenSoloRequest):
+    """批量上传账号到 TokenSolo"""
+
+    with get_db() as db:
+        if request.service_id:
+            svc = crud.get_tokensolo_service_by_id(db, request.service_id)
+        else:
+            svcs = crud.get_tokensolo_services(db, enabled=True)
+            svc = svcs[0] if svcs else None
+
+        if not svc:
+            raise HTTPException(status_code=400, detail="未找到可用的 TokenSolo 服务，请先在设置中配置")
+
+        ids = resolve_account_ids(
+            db, request.ids, request.select_all,
+            request.status_filter, request.email_service_filter, request.search_filter
+        )
+
+        api_url = svc.api_url
+        import_secret = svc.import_secret
+        channel = svc.channel or "codex"
+        account_type = svc.account_type or "codex"
+        models = svc.models or "gpt-5.4"
+
+    return batch_upload_to_tokensolo(
+        ids,
+        api_url=api_url,
+        import_secret=import_secret,
+        channel=channel,
+        account_type=account_type,
+        models=models,
+    )
+
+
+@router.post("/{account_id}/upload-tokensolo")
+async def upload_account_to_tokensolo(account_id: int, request: Optional[UploadTokenSoloRequest] = Body(default=None)):
+    """上传单账号到 TokenSolo"""
+
+    service_id = request.service_id if request else None
+
+    with get_db() as db:
+        if service_id:
+            svc = crud.get_tokensolo_service_by_id(db, service_id)
+        else:
+            svcs = crud.get_tokensolo_services(db, enabled=True)
+            svc = svcs[0] if svcs else None
+
+        if not svc:
+            raise HTTPException(status_code=400, detail="未找到可用的 TokenSolo 服务，请先在设置中配置")
+
+        account = crud.get_account_by_id(db, account_id)
+        if not account:
+            raise HTTPException(status_code=404, detail="账号不存在")
+        if not account.access_token:
+            return {"success": False, "error": "账号缺少 Token，无法上传"}
+
+        success, message = upload_to_tokensolo(
+            [account],
+            api_url=svc.api_url,
+            import_secret=svc.import_secret,
+            channel=svc.channel or "codex",
+            account_type=svc.account_type or "codex",
+            models=svc.models or "gpt-5.4",
+        )
+
+    if success:
+        return {"success": True, "message": message}
+    return {"success": False, "error": message}
 
 
 # ============== Inbox Code ==============

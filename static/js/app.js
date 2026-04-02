@@ -243,6 +243,9 @@ const elements = {
     autoUploadTm: document.getElementById('auto-upload-tm'),
     tmServiceSelectGroup: document.getElementById('tm-service-select-group'),
     tmServiceSelect: document.getElementById('tm-service-select'),
+    autoUploadTokenSolo: document.getElementById('auto-upload-tokensolo'),
+    tokenSoloServiceSelectGroup: document.getElementById('tokensolo-service-select-group'),
+    tokenSoloServiceSelect: document.getElementById('tokensolo-service-select'),
 };
 
 // 初始化
@@ -279,6 +282,7 @@ async function initAutoUploadOptions() {
         loadServiceSelect('/cpa-services?enabled=true', elements.cpaServiceSelect, elements.autoUploadCpa, elements.cpaServiceSelectGroup),
         loadServiceSelect('/sub2api-services?enabled=true', elements.sub2apiServiceSelect, elements.autoUploadSub2api, elements.sub2apiServiceSelectGroup),
         loadServiceSelect('/tm-services?enabled=true', elements.tmServiceSelect, elements.autoUploadTm, elements.tmServiceSelectGroup),
+        loadServiceSelect('/tokensolo-services?enabled=true', elements.tokenSoloServiceSelect, elements.autoUploadTokenSolo, elements.tokenSoloServiceSelectGroup),
     ]);
 }
 
@@ -668,6 +672,8 @@ async function handleStartRegistration(e) {
         sub2api_service_ids: elements.autoUploadSub2api && elements.autoUploadSub2api.checked ? getSelectedServiceIds(elements.sub2apiServiceSelect) : [],
         auto_upload_tm: elements.autoUploadTm ? elements.autoUploadTm.checked : false,
         tm_service_ids: elements.autoUploadTm && elements.autoUploadTm.checked ? getSelectedServiceIds(elements.tmServiceSelect) : [],
+        auto_upload_tokensolo: elements.autoUploadTokenSolo ? elements.autoUploadTokenSolo.checked : false,
+        tokensolo_service_ids: elements.autoUploadTokenSolo && elements.autoUploadTokenSolo.checked ? getSelectedServiceIds(elements.tokenSoloServiceSelect) : [],
     };
 
     // 如果选择了数据库中的服务，传递 service_id
@@ -1497,6 +1503,8 @@ async function handleOutlookBatchRegistration() {
         sub2api_service_ids: elements.autoUploadSub2api && elements.autoUploadSub2api.checked ? getSelectedServiceIds(elements.sub2apiServiceSelect) : [],
         auto_upload_tm: elements.autoUploadTm ? elements.autoUploadTm.checked : false,
         tm_service_ids: elements.autoUploadTm && elements.autoUploadTm.checked ? getSelectedServiceIds(elements.tmServiceSelect) : [],
+        auto_upload_tokensolo: elements.autoUploadTokenSolo ? elements.autoUploadTokenSolo.checked : false,
+        tokensolo_service_ids: elements.autoUploadTokenSolo && elements.autoUploadTokenSolo.checked ? getSelectedServiceIds(elements.tokenSoloServiceSelect) : [],
     };
 
     addLog('info', `[系统] 正在启动 Outlook 批量注册 (${selectedIds.length} 个账户)...`);

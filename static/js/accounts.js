@@ -336,6 +336,7 @@ function initEventListeners() {
     document.getElementById('batch-upload-cpa-item').addEventListener('click', (e) => { e.preventDefault(); uploadMenu.classList.remove('active'); handleBatchUploadCpa(); });
     document.getElementById('batch-upload-sub2api-item').addEventListener('click', (e) => { e.preventDefault(); uploadMenu.classList.remove('active'); handleBatchUploadSub2Api(); });
     document.getElementById('batch-upload-tm-item').addEventListener('click', (e) => { e.preventDefault(); uploadMenu.classList.remove('active'); handleBatchUploadTm(); });
+    document.getElementById('batch-upload-tokensolo-item').addEventListener('click', (e) => { e.preventDefault(); uploadMenu.classList.remove('active'); handleBatchUploadTokenSolo(); });
 
     // 批量删除
     elements.batchDeleteBtn.addEventListener('click', handleBatchDelete);
@@ -1873,6 +1874,7 @@ async function uploadAccount(id) {
         { label: '☁️ 上传到 CPA', value: 'cpa' },
         { label: '🔗 上传到 Sub2API', value: 'sub2api' },
         { label: '🚀 上传到 Team Manager', value: 'tm' },
+        { label: '🪙 上传到 TokenSolo', value: 'tokensolo' },
     ];
 
     const choice = await new Promise((resolve) => {
@@ -1902,6 +1904,7 @@ async function uploadAccount(id) {
     if (choice === 'cpa') return uploadToCpa(id);
     if (choice === 'sub2api') return uploadToSub2Api(id);
     if (choice === 'tm') return uploadToTm(id);
+    if (choice === 'tokensolo') return uploadToTokenSolo(id);
 }
 
 // 上传单个账号到CPA
@@ -2208,6 +2211,71 @@ function selectTmService() {
     });
 }
 
+function selectTokenSoloService() {
+    return new Promise(async (resolve) => {
+        const modal = document.getElementById('tokensolo-service-modal');
+        const listEl = document.getElementById('tokensolo-service-list');
+        const closeBtn = document.getElementById('close-tokensolo-modal');
+        const cancelBtn = document.getElementById('cancel-tokensolo-modal-btn');
+        const autoBtn = document.getElementById('tokensolo-use-auto-btn');
+
+        listEl.innerHTML = '<div style="text-align:center;color:var(--text-muted)">加载中...</div>';
+        modal.classList.add('active');
+
+        let services = [];
+        try {
+            services = await api.get('/tokensolo-services?enabled=true');
+        } catch (e) {
+            services = [];
+        }
+
+        if (services.length === 0) {
+            listEl.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:12px;">暂无已启用的 TokenSolo 服务，将自动选择第一个</div>';
+        } else {
+            listEl.innerHTML = services.map(s => `
+                <div class="tokensolo-service-item" data-id="${s.id}" style="
+                    padding: 10px 14px;
+                    border: 1px solid var(--border);
+                    border-radius: 8px;
+                    cursor: pointer;
+                    transition: background 0.15s;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                ">
+                    <div>
+                        <div style="font-weight:500;">${escapeHtml(s.name)}</div>
+                        <div style="font-size:0.8rem;color:var(--text-muted);">${escapeHtml(s.api_url)}</div>
+                    </div>
+                    <span class="badge" style="background:var(--warning-color);color:#fff;font-size:0.7rem;padding:2px 8px;border-radius:10px;">选择</span>
+                </div>
+            `).join('');
+
+            listEl.querySelectorAll('.tokensolo-service-item').forEach(item => {
+                item.addEventListener('mouseenter', () => item.style.background = 'var(--surface-hover)');
+                item.addEventListener('mouseleave', () => item.style.background = '');
+                item.addEventListener('click', () => {
+                    cleanup();
+                    resolve({ service_id: parseInt(item.dataset.id) });
+                });
+            });
+        }
+
+        function cleanup() {
+            modal.classList.remove('active');
+            closeBtn.removeEventListener('click', onCancel);
+            cancelBtn.removeEventListener('click', onCancel);
+            autoBtn.removeEventListener('click', onAuto);
+        }
+        function onCancel() { cleanup(); resolve(null); }
+        function onAuto() { cleanup(); resolve({ service_id: null }); }
+
+        closeBtn.addEventListener('click', onCancel);
+        cancelBtn.addEventListener('click', onCancel);
+        autoBtn.addEventListener('click', onAuto);
+    });
+}
+
 // 上传单账号到 Team Manager
 async function uploadToTm(id) {
     const choice = await selectTmService();
@@ -2221,6 +2289,24 @@ async function uploadToTm(id) {
             toast.success('上传成功');
         } else {
             toast.error('上传失败: ' + (result.message || '未知错误'));
+        }
+    } catch (e) {
+        toast.error('上传失败: ' + e.message);
+    }
+}
+
+async function uploadToTokenSolo(id) {
+    const choice = await selectTokenSoloService();
+    if (choice === null) return;
+    try {
+        toast.info('正在上传到 TokenSolo...');
+        const payload = {};
+        if (choice.service_id != null) payload.service_id = choice.service_id;
+        const result = await api.post(`/accounts/${id}/upload-tokensolo`, payload);
+        if (result.success) {
+            toast.success('上传成功');
+        } else {
+            toast.error('上传失败: ' + (result.error || result.message || '未知错误'));
         }
     } catch (e) {
         toast.error('上传失败: ' + e.message);
@@ -2245,6 +2331,35 @@ async function handleBatchUploadTm() {
         const payload = buildBatchPayload();
         if (choice.service_id != null) payload.service_id = choice.service_id;
         const result = await api.post('/accounts/batch-upload-tm', payload);
+        let message = `成功: ${result.success_count}`;
+        if (result.failed_count > 0) message += `, 失败: ${result.failed_count}`;
+        if (result.skipped_count > 0) message += `, 跳过: ${result.skipped_count}`;
+        toast.success(message);
+        loadAccounts();
+    } catch (e) {
+        toast.error('批量上传失败: ' + e.message);
+    } finally {
+        updateBatchButtons();
+    }
+}
+
+async function handleBatchUploadTokenSolo() {
+    const count = getEffectiveCount();
+    if (count === 0) return;
+
+    const choice = await selectTokenSoloService();
+    if (choice === null) return;
+
+    const confirmed = await confirm(`确定要将选中的 ${count} 个账号上传到 TokenSolo 吗？`);
+    if (!confirmed) return;
+
+    elements.batchUploadBtn.disabled = true;
+    elements.batchUploadBtn.textContent = '上传中...';
+
+    try {
+        const payload = buildBatchPayload();
+        if (choice.service_id != null) payload.service_id = choice.service_id;
+        const result = await api.post('/accounts/batch-upload-tokensolo', payload);
         let message = `成功: ${result.success_count}`;
         if (result.failed_count > 0) message += `, 失败: ${result.failed_count}`;
         if (result.skipped_count > 0) message += `, 跳过: ${result.skipped_count}`;

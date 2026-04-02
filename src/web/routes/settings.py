@@ -4,6 +4,7 @@
 
 import logging
 import os
+import re
 import sys
 from typing import Optional, Any, Dict, List, Tuple, Set
 from pathlib import Path
@@ -21,10 +22,7 @@ from ...proxy_utils import normalize_proxy_type as _normalize_saved_proxy_type, 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 RELOAD_TRIGGER_PATH = Path(__file__).resolve().parents[1] / "reload_trigger.py"
-PROXY_TEST_TARGETS: Tuple[Tuple[str, Set[int]], ...] = (
-    ("https://chatgpt.com/backend-api/me", {200, 401, 403}),
-    ("https://auth.openai.com/", {200, 401, 403}),
-)
+PROXY_TEST_TARGET = "https://api.ipify.org?format=json"
 
 
 # ============== Pydantic Models ==============
@@ -781,41 +779,76 @@ def _is_supported_proxy_type(proxy_type: Optional[str]) -> bool:
     return value in {"http", "https", "socks", "socks5", "socks5h"}
 
 
+def _extract_ip_from_probe_payload(response) -> Optional[str]:
+    try:
+        data = response.json()
+        if isinstance(data, dict):
+            for key in ("ip", "query", "origin"):
+                value = str(data.get(key) or "").strip()
+                if value:
+                    return value
+    except Exception:
+        pass
+
+    text = str(getattr(response, "text", "") or "").strip()
+    if not text:
+        return None
+
+    match = re.search(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", text)
+    if match:
+        return match.group(0)
+    return None
+
+
 def _probe_proxy_connectivity(proxy_url: str, timeout_seconds: int = 5) -> Dict[str, Any]:
     import time
     from curl_cffi import requests as cffi_requests
 
     runtime_proxy = upgrade_proxy_url_for_requests(proxy_url) or proxy_url
-    last_message = "未命中可用的测试目标"
+    started = time.time()
 
-    for target_url, ok_statuses in PROXY_TEST_TARGETS:
-        started = time.time()
-        try:
-            response = cffi_requests.get(
-                target_url,
-                proxy=runtime_proxy,
-                timeout=timeout_seconds,
-                impersonate="chrome110",
-            )
-            elapsed = round((time.time() - started) * 1000)
-            if response.status_code in ok_statuses:
-                return {
-                    "success": True,
-                    "proxy_url": runtime_proxy,
-                    "response_time": elapsed,
-                    "status_code": int(response.status_code),
-                    "target": target_url,
-                    "message": f"代理连接成功，{target_url} 返回 HTTP {response.status_code}，响应时间: {elapsed}ms",
-                }
-            last_message = f"{target_url} 返回 HTTP {response.status_code}"
-        except Exception as exc:
-            last_message = f"{target_url} 请求失败: {exc}"
+    try:
+        response = cffi_requests.get(
+            PROXY_TEST_TARGET,
+            proxies={
+                "http": runtime_proxy,
+                "https": runtime_proxy,
+            },
+            timeout=timeout_seconds,
+            impersonate="chrome110",
+        )
+        elapsed = round((time.time() - started) * 1000)
 
-    return {
-        "success": False,
-        "proxy_url": runtime_proxy,
-        "message": f"代理连接失败: {last_message}",
-    }
+        if response.status_code != 200:
+            return {
+                "success": False,
+                "proxy_url": runtime_proxy,
+                "message": f"代理返回错误状态码: {response.status_code}",
+            }
+
+        ip_address = _extract_ip_from_probe_payload(response)
+        if not ip_address:
+            return {
+                "success": False,
+                "proxy_url": runtime_proxy,
+                "message": "代理连接失败: 未返回有效 IP",
+            }
+
+        return {
+            "success": True,
+            "proxy_url": runtime_proxy,
+            "response_time": elapsed,
+            "status_code": 200,
+            "ip": ip_address,
+            "target": PROXY_TEST_TARGET,
+            "message": f"代理连接成功，出口 IP: {ip_address}",
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "proxy_url": runtime_proxy,
+            "message": f"代理连接失败: {exc}",
+        }
 
 
 def _build_proxy_key(proxy_type: str, host: str, port: int, username: Optional[str]) -> Tuple[str, str, int, str]:

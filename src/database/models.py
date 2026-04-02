@@ -389,6 +389,23 @@ class TeamManagerService(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class TokenSoloService(Base):
+    """TokenSolo 服务配置表"""
+    __tablename__ = 'tokensolo_services'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)
+    api_url = Column(String(500), nullable=False)
+    import_secret = Column(Text, nullable=False)
+    channel = Column(String(100), nullable=False, default='codex')
+    account_type = Column(String(50), nullable=False, default='codex')
+    models = Column(Text, nullable=False, default='gpt-5.4')
+    enabled = Column(Boolean, default=True)
+    priority = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class Proxy(Base):
     """代理列表表"""
     __tablename__ = 'proxies'
