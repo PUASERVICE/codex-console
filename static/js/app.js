@@ -38,6 +38,20 @@ let wsHeartbeatInterval = null;  // 心跳定时器
 let batchWsHeartbeatInterval = null;  // 批量任务心跳定时器
 let activeTaskUuid = null;   // 当前活跃的单任务 UUID（用于页面重新可见时重连）
 let activeBatchId = null;    // 当前活跃的批量任务 ID（用于页面重新可见时重连）
+const ACTIVE_SINGLE_TASK_STATUSES = new Set(['pending', 'running']);
+const STOP_MONITORING_SINGLE_TASK_STATUSES = new Set(['completed', 'failed', 'cancelled', 'cancelling', 'deferred', 'paused']);
+
+function normalizeTaskStatus(status) {
+    return String(status || '').trim().toLowerCase();
+}
+
+function isActiveSingleTaskStatus(status) {
+    return ACTIVE_SINGLE_TASK_STATUSES.has(normalizeTaskStatus(status));
+}
+
+function shouldStopMonitoringSingleTask(status) {
+    return STOP_MONITORING_SINGLE_TASK_STATUSES.has(normalizeTaskStatus(status));
+}
 
 function getBatchTaskLabel() {
     return isOutlookBatchMode ? 'Outlook 批量任务' : '批量任务';
@@ -68,7 +82,52 @@ function getSingleCompletionMessage(status) {
     if (status === 'failed') {
         return `[错误] 注册失败，邮箱服务: ${serviceLabel}`;
     }
+    if (status === 'deferred') {
+        return `[提示] 任务已转为延后重试，已停止自动监控，邮箱服务: ${serviceLabel}`;
+    }
     return `[警告] 任务已取消，邮箱服务: ${serviceLabel}`;
+}
+
+function finalizeSingleTaskMonitoring(status, taskUuid) {
+    const normalizedStatus = normalizeTaskStatus(status);
+
+    taskFinalStatus = normalizedStatus;
+    taskCompleted = true;
+
+    if (taskUuid) {
+        refreshTaskSummary(taskUuid);
+    }
+
+    stopLogPolling();
+    disconnectWebSocket();
+    resetButtons();
+
+    if (toastShown) {
+        return;
+    }
+
+    toastShown = true;
+
+    if (normalizedStatus === 'completed') {
+        addLog('success', getSingleCompletionMessage('completed'));
+        toast.success(`注册成功！邮箱服务: ${getCurrentSingleServiceLabel()}`);
+        loadRecentAccounts();
+        return;
+    }
+
+    if (normalizedStatus === 'failed') {
+        addLog('error', getSingleCompletionMessage('failed'));
+        toast.error(`注册失败，邮箱服务: ${getCurrentSingleServiceLabel()}`);
+        return;
+    }
+
+    if (normalizedStatus === 'deferred') {
+        addLog('warning', getSingleCompletionMessage('deferred'));
+        toast.warning('任务已转为延后重试，已停止自动监控');
+        return;
+    }
+
+    addLog('warning', getSingleCompletionMessage('cancelled'));
 }
 
 function getCurrentBatchServiceLabel() {
@@ -773,7 +832,11 @@ function connectWebSocket(taskUuid) {
                 const logType = getLogType(data.message);
                 addLog(logType, data.message);
             } else if (data.type === 'status') {
-                updateTaskStatus(data.status);
+                const normalizedStatus = normalizeTaskStatus(data.status);
+                updateTaskStatus(normalizedStatus);
+                if (currentTask) {
+                    currentTask.status = normalizedStatus;
+                }
                 if (data.email) {
                     elements.taskEmail.textContent = data.email;
                 }
@@ -781,34 +844,8 @@ function connectWebSocket(taskUuid) {
                     elements.taskService.textContent = getServiceTypeText(data.email_service);
                 }
 
-                // 检查是否完成
-                if (['completed', 'failed', 'cancelled', 'cancelling'].includes(data.status)) {
-                    // 保存最终状态，用于 onclose 判断
-                    taskFinalStatus = data.status;
-                    taskCompleted = true;
-                    refreshTaskSummary(currentTask?.task_uuid || taskUuid);
-
-                    // 断开 WebSocket（异步操作）
-                    disconnectWebSocket();
-
-                    // 任务完成后再重置按钮
-                    resetButtons();
-
-                    // 只显示一次 toast
-                    if (!toastShown) {
-                        toastShown = true;
-                        if (data.status === 'completed') {
-                            addLog('success', getSingleCompletionMessage('completed'));
-                            toast.success(`注册成功！邮箱服务: ${getCurrentSingleServiceLabel()}`);
-                            // 刷新账号列表
-                            loadRecentAccounts();
-                        } else if (data.status === 'failed') {
-                            addLog('error', getSingleCompletionMessage('failed'));
-                            toast.error(`注册失败，邮箱服务: ${getCurrentSingleServiceLabel()}`);
-                        } else if (data.status === 'cancelled' || data.status === 'cancelling') {
-                            addLog('warning', getSingleCompletionMessage('cancelled'));
-                        }
-                    }
+                if (shouldStopMonitoringSingleTask(normalizedStatus)) {
+                    finalizeSingleTaskMonitoring(normalizedStatus, currentTask?.task_uuid || taskUuid);
                 }
             } else if (data.type === 'pong') {
                 // 心跳响应，忽略
@@ -1002,9 +1039,13 @@ function startLogPolling(taskUuid) {
     logPollingInterval = setInterval(async () => {
         try {
             const data = await api.get(`/registration/tasks/${taskUuid}/logs`);
+            const normalizedStatus = normalizeTaskStatus(data.status);
 
             // 更新任务状态
-            updateTaskStatus(data.status);
+            updateTaskStatus(normalizedStatus);
+            if (currentTask) {
+                currentTask.status = normalizedStatus;
+            }
 
             // 更新邮箱信息
             if (data.email) {
@@ -1021,27 +1062,8 @@ function startLogPolling(taskUuid) {
             }
             lastLogIndex = logs.length;
 
-            // 检查任务是否完成
-            if (['completed', 'failed', 'cancelled'].includes(data.status)) {
-                stopLogPolling();
-                refreshTaskSummary(taskUuid);
-                resetButtons();
-
-                // 只显示一次 toast
-                if (!toastShown) {
-                    toastShown = true;
-                    if (data.status === 'completed') {
-                        addLog('success', getSingleCompletionMessage('completed'));
-                        toast.success(`注册成功！邮箱服务: ${getCurrentSingleServiceLabel()}`);
-                        // 刷新账号列表
-                        loadRecentAccounts();
-                    } else if (data.status === 'failed') {
-                        addLog('error', getSingleCompletionMessage('failed'));
-                        toast.error(`注册失败，邮箱服务: ${getCurrentSingleServiceLabel()}`);
-                    } else if (data.status === 'cancelled') {
-                        addLog('warning', getSingleCompletionMessage('cancelled'));
-                    }
-                }
+            if (shouldStopMonitoringSingleTask(normalizedStatus)) {
+                finalizeSingleTaskMonitoring(normalizedStatus, taskUuid);
             }
         } catch (error) {
             console.error('轮询日志失败:', error);
@@ -1106,7 +1128,10 @@ function updateTaskStatus(status) {
         running: { text: '运行中', class: 'running' },
         completed: { text: '已完成', class: 'completed' },
         failed: { text: '失败', class: 'failed' },
-        cancelled: { text: '已取消', class: 'disabled' }
+        cancelled: { text: '已取消', class: 'disabled' },
+        cancelling: { text: '取消中', class: 'disabled' },
+        deferred: { text: '延后重试', class: 'pending' },
+        paused: { text: '已暂停', class: 'pending' }
     };
 
     const info = statusInfo[status] || { text: status, class: '' };
@@ -1719,7 +1744,7 @@ function initVisibilityReconnect() {
         const batchWsDisconnected = !batchWebSocket || batchWebSocket.readyState === WebSocket.CLOSED;
 
         // 单任务重连
-        if (activeTaskUuid && !taskCompleted && wsDisconnected) {
+        if (activeTaskUuid && !taskCompleted && wsDisconnected && isActiveSingleTaskStatus(currentTask?.status)) {
             console.log('[重连] 页面重新可见，重连单任务 WebSocket:', activeTaskUuid);
             addLog('info', '[系统] 页面重新激活，正在重连任务监控...');
             connectWebSocket(activeTaskUuid);
@@ -1753,7 +1778,9 @@ async function restoreActiveTask() {
         // 查询任务是否仍在运行
         try {
             const data = await api.get(`/registration/tasks/${task_uuid}`);
-            if (['completed', 'failed', 'cancelled'].includes(data.status)) {
+            const normalizedStatus = normalizeTaskStatus(data.status);
+            if (!isActiveSingleTaskStatus(normalizedStatus)) {
+                console.log('[恢复] 跳过非活跃单任务:', task_uuid, normalizedStatus);
                 sessionStorage.removeItem('activeTask');
                 return;
             }
@@ -1767,7 +1794,7 @@ async function restoreActiveTask() {
             elements.startBtn.disabled = true;
             elements.cancelBtn.disabled = false;
             showTaskStatus(data);
-            updateTaskStatus(data.status);
+            updateTaskStatus(normalizedStatus);
             addLog('info', `[系统] 检测到进行中的任务，正在重连监控... (${task_uuid.substring(0, 8)})`);
             connectWebSocket(task_uuid);
         } catch {
