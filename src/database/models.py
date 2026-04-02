@@ -11,6 +11,7 @@ from sqlalchemy.types import TypeDecorator
 from sqlalchemy.orm import relationship
 
 from ..config.constants import AccountLabel, PoolState, RoleTag
+from ..proxy_utils import build_proxy_url, normalize_proxy_type
 
 Base = declarative_base()
 
@@ -411,7 +412,7 @@ class Proxy(Base):
         result = {
             'id': self.id,
             'name': self.name,
-            'type': self.type,
+            'type': normalize_proxy_type(self.type),
             'host': self.host,
             'port': self.port,
             'username': self.username,
@@ -431,15 +432,11 @@ class Proxy(Base):
     @property
     def proxy_url(self) -> str:
         """获取完整的代理 URL"""
-        if self.type == "http":
-            scheme = "http"
-        elif self.type == "socks5":
-            scheme = "socks5"
-        else:
-            scheme = self.type
-
-        auth = ""
-        if self.username and self.password:
-            auth = f"{self.username}:{self.password}@"
-
-        return f"{scheme}://{auth}{self.host}:{self.port}"
+        proxy_url = build_proxy_url(
+            self.type,
+            self.host,
+            self.port,
+            self.username,
+            self.password,
+        )
+        return proxy_url or f"http://{self.host}:{self.port}"

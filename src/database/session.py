@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import SQLAlchemyError
 import os
 import logging
+from pathlib import Path
 
 from .models import Base
 
@@ -16,11 +17,25 @@ logger = logging.getLogger(__name__)
 
 
 def _build_sqlalchemy_url(database_url: str) -> str:
-    if database_url.startswith("postgresql://"):
-        return "postgresql+psycopg://" + database_url[len("postgresql://"):]
-    if database_url.startswith("postgres://"):
-        return "postgresql+psycopg://" + database_url[len("postgres://"):]
-    return database_url
+    raw = str(database_url or "").strip().strip('"').strip("'")
+    if not raw:
+        return raw
+    if raw.startswith("postgresql://"):
+        return "postgresql+psycopg://" + raw[len("postgresql://"):]
+    if raw.startswith("postgres://"):
+        return "postgresql+psycopg://" + raw[len("postgres://"):]
+    if raw.startswith("sqlite://"):
+        return raw
+    if raw == ":memory:":
+        return "sqlite:///:memory:"
+    if "://" in raw:
+        return raw
+
+    expanded = os.path.expanduser(os.path.expandvars(raw))
+    path = Path(expanded)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    return f"sqlite:///{path}"
 
 
 class DatabaseSessionManager:

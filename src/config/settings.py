@@ -10,6 +10,8 @@ from pydantic import BaseModel, field_validator
 from pydantic.types import SecretStr
 from dataclasses import dataclass
 
+from ..proxy_utils import build_proxy_url
+
 
 class SettingCategory(str, Enum):
     """设置分类"""
@@ -547,11 +549,20 @@ def _convert_value(attr_name: str, value: str) -> Any:
 
 
 def _normalize_database_url(url: str) -> str:
-    if url.startswith("postgres://"):
-        return "postgresql+psycopg://" + url[len("postgres://"):]
-    if url.startswith("postgresql://"):
-        return "postgresql+psycopg://" + url[len("postgresql://"):]
-    return url
+    raw = str(url or "").strip().strip('"').strip("'")
+    if not raw:
+        return raw
+    if raw.startswith("postgres://"):
+        return "postgresql+psycopg://" + raw[len("postgres://"):]
+    if raw.startswith("postgresql://"):
+        return "postgresql+psycopg://" + raw[len("postgresql://"):]
+    if raw.startswith("sqlite://"):
+        return raw
+    if raw == ":memory:":
+        return "sqlite:///:memory:"
+    if "://" in raw:
+        return raw
+    return f"sqlite:///{os.path.abspath(os.path.expanduser(os.path.expandvars(raw)))}"
 
 
 def _value_to_string(value: Any) -> str:
@@ -737,19 +748,14 @@ class Settings(BaseModel):
         """获取完整的代理 URL"""
         if not self.proxy_enabled:
             return None
-
-        if self.proxy_type == "http":
-            scheme = "http"
-        elif self.proxy_type == "socks5":
-            scheme = "socks5"
-        else:
-            return None
-
-        auth = ""
-        if self.proxy_username and self.proxy_password:
-            auth = f"{self.proxy_username}:{self.proxy_password.get_secret_value()}@"
-
-        return f"{scheme}://{auth}{self.proxy_host}:{self.proxy_port}"
+        password = self.proxy_password.get_secret_value() if self.proxy_password else None
+        return build_proxy_url(
+            self.proxy_type,
+            self.proxy_host,
+            self.proxy_port,
+            self.proxy_username,
+            password,
+        )
 
     # 注册配置
     registration_max_retries: int = 3

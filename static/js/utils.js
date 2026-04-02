@@ -830,6 +830,32 @@ document.addEventListener('DOMContentLoaded', () => {
     // 初始化主题
     theme.applyTheme();
 
+    document.querySelectorAll('.js-restart-webui').forEach((button) => {
+        button.addEventListener('click', async (event) => {
+            event.preventDefault();
+            if (button.disabled) return;
+            const confirmed = typeof window.confirm === 'function'
+                ? await window.confirm('将通过热重载重启当前 WebUI，是否继续？', '重启 WebUI')
+                : true;
+            if (!confirmed) return;
+            loading.show(button, '重启中...');
+            try {
+                const result = await api.post('/settings/webui/restart', {});
+                toast.success(result?.message || 'WebUI 热重载重启已触发');
+                button.disabled = true;
+                window.setTimeout(() => {
+                    window.location.reload();
+                }, 1800);
+            } catch (error) {
+                toast.error(error.message || 'WebUI 重启失败');
+            } finally {
+                if (!button.disabled) {
+                    loading.hide(button);
+                }
+            }
+        });
+    });
+
     // 全局键盘快捷键
     document.addEventListener('keydown', (e) => {
         // Ctrl/Cmd + K: 聚焦搜索

@@ -312,7 +312,7 @@ DEFAULT_USER_INFO = {
 # 代理相关常量
 # ============================================================================
 
-PROXY_TYPES = ["http", "socks5", "socks5h"]
+PROXY_TYPES = ["http", "socks5"]
 DEFAULT_PROXY_CONFIG = {
     "enabled": False,
     "type": "http",

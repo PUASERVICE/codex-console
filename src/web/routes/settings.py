@@ -5,18 +5,25 @@
 import logging
 import os
 from typing import Optional, Any, Dict, List, Tuple, Set
+from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks
 from pydantic import BaseModel
 
 from ...config.settings import get_settings, update_settings
 from ...database import crud
 from ...database.models import Proxy
 from ...database.session import get_db
+from ...proxy_utils import normalize_proxy_type as _normalize_saved_proxy_type, upgrade_proxy_url_for_requests
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+RELOAD_TRIGGER_PATH = Path(__file__).resolve().parents[1] / "reload_trigger.py"
+PROXY_TEST_TARGETS: Tuple[Tuple[str, Set[int]], ...] = (
+    ("https://chatgpt.com/backend-api/me", {200, 401, 403}),
+    ("https://auth.openai.com/", {200, 401, 403}),
+)
 
 
 # ============== Pydantic Models ==============
@@ -84,6 +91,23 @@ class AllSettings(BaseModel):
     webui: WebUISettings
 
 
+def _write_reload_trigger() -> str:
+    import time
+
+    token = f"reload-{int(time.time() * 1000)}"
+    RELOAD_TRIGGER_PATH.parent.mkdir(parents=True, exist_ok=True)
+    RELOAD_TRIGGER_PATH.write_text(
+        '"""\n'
+        "Web UI 热重载触发文件。\n\n"
+        "修改此文件内容可触发 uvicorn --reload 重新加载应用。\n"
+        '"""\n\n'
+        f'RELOAD_TOKEN = "{token}"\n',
+        encoding="utf-8",
+    )
+    logger.warning("收到 Web UI 热重载请求，已写入触发文件: %s", RELOAD_TRIGGER_PATH)
+    return token
+
+
 def _verify_auto_quick_refresh_settings_persisted(
     *,
     enabled: bool,
@@ -128,7 +152,7 @@ async def get_all_settings():
     return {
         "proxy": {
             "enabled": settings.proxy_enabled,
-            "type": settings.proxy_type,
+            "type": _normalize_proxy_type(settings.proxy_type),
             "host": settings.proxy_host,
             "port": settings.proxy_port,
             "username": settings.proxy_username,
@@ -319,26 +343,7 @@ async def test_dynamic_proxy(request: DynamicProxySettings):
     if not proxy_url:
         return {"success": False, "message": "动态代理 API 返回为空或请求失败"}
 
-    # 用获取到的代理测试连通性
-    import time
-    from curl_cffi import requests as cffi_requests
-    try:
-        proxies = {"http": proxy_url, "https": proxy_url}
-        start = time.time()
-        resp = cffi_requests.get(
-            "https://api.ipify.org?format=json",
-            proxies=proxies,
-            timeout=10,
-            impersonate="chrome110"
-        )
-        elapsed = round((time.time() - start) * 1000)
-        if resp.status_code == 200:
-            ip = resp.json().get("ip", "")
-            return {"success": True, "proxy_url": proxy_url, "ip": ip, "response_time": elapsed,
-                    "message": f"动态代理可用，出口 IP: {ip}，响应时间: {elapsed}ms"}
-        return {"success": False, "proxy_url": proxy_url, "message": f"代理连接失败: HTTP {resp.status_code}"}
-    except Exception as e:
-        return {"success": False, "proxy_url": proxy_url, "message": f"代理连接失败: {e}"}
+    return _probe_proxy_connectivity(proxy_url, timeout_seconds=10)
 
 
 @router.get("/registration")
@@ -395,6 +400,13 @@ async def update_webui_settings(request: WebUISettings):
 
     update_settings(**update_dict)
     return {"success": True, "message": "Web UI 设置已更新"}
+
+
+@router.post("/webui/restart")
+async def restart_webui(background_tasks: BackgroundTasks):
+    """通过热重载重启 Web UI。"""
+    background_tasks.add_task(_write_reload_trigger)
+    return {"success": True, "message": "已触发 Web UI 热重载重启，页面将在稍后自动刷新"}
 
 
 @router.get("/database")
@@ -724,12 +736,49 @@ class ProxyBatchImportRequest(BaseModel):
 
 
 def _normalize_proxy_type(proxy_type: Optional[str]) -> str:
-    value = str(proxy_type or "http").strip().lower()
-    if value in {"http", "https"}:
-        return "http"
-    if value in {"socks", "socks5", "socks5h"}:
-        return "socks5"
-    return "http"
+    return _normalize_saved_proxy_type(proxy_type)
+
+
+def _is_supported_proxy_type(proxy_type: Optional[str]) -> bool:
+    value = str(proxy_type or "").strip().lower()
+    return value in {"http", "https", "socks", "socks5", "socks5h"}
+
+
+def _probe_proxy_connectivity(proxy_url: str, timeout_seconds: int = 5) -> Dict[str, Any]:
+    import time
+    from curl_cffi import requests as cffi_requests
+
+    runtime_proxy = upgrade_proxy_url_for_requests(proxy_url) or proxy_url
+    last_message = "未命中可用的测试目标"
+
+    for target_url, ok_statuses in PROXY_TEST_TARGETS:
+        started = time.time()
+        try:
+            response = cffi_requests.get(
+                target_url,
+                proxy=runtime_proxy,
+                timeout=timeout_seconds,
+                impersonate="chrome110",
+            )
+            elapsed = round((time.time() - started) * 1000)
+            if response.status_code in ok_statuses:
+                return {
+                    "success": True,
+                    "proxy_url": runtime_proxy,
+                    "response_time": elapsed,
+                    "status_code": int(response.status_code),
+                    "target": target_url,
+                    "message": f"代理连接成功，{target_url} 返回 HTTP {response.status_code}，响应时间: {elapsed}ms",
+                }
+            last_message = f"{target_url} 返回 HTTP {response.status_code}"
+        except Exception as exc:
+            last_message = f"{target_url} 请求失败: {exc}"
+
+    return {
+        "success": False,
+        "proxy_url": runtime_proxy,
+        "message": f"代理连接失败: {last_message}",
+    }
 
 
 def _build_proxy_key(proxy_type: str, host: str, port: int, username: Optional[str]) -> Tuple[str, str, int, str]:
@@ -750,7 +799,7 @@ def _parse_proxy_import_line(line: str, default_type: str) -> Optional[Dict[str,
 
     # 支持 CSV: name,type,host,port[,username[,password]]
     parts = [item.strip() for item in raw.split(",")]
-    if len(parts) >= 4 and _normalize_proxy_type(parts[1]) in {"http", "socks5"}:
+    if len(parts) >= 4 and _is_supported_proxy_type(parts[1]):
         name = parts[0] or ""
         proxy_type = _normalize_proxy_type(parts[1])
         host = parts[2]
@@ -927,7 +976,7 @@ async def create_proxy_item(request: ProxyCreateRequest):
         proxy = crud.create_proxy(
             db,
             name=request.name,
-            type=request.type,
+            type=_normalize_proxy_type(request.type),
             host=request.host,
             port=request.port,
             username=request.username,
@@ -956,7 +1005,7 @@ async def update_proxy_item(proxy_id: int, request: ProxyUpdateRequest):
         if request.name is not None:
             update_data["name"] = request.name
         if request.type is not None:
-            update_data["type"] = request.type
+            update_data["type"] = _normalize_proxy_type(request.type)
         if request.host is not None:
             update_data["host"] = request.host
         if request.port is not None:
@@ -999,108 +1048,32 @@ async def set_proxy_default(proxy_id: int):
 @router.post("/proxies/{proxy_id}/test")
 async def test_proxy_item(proxy_id: int):
     """测试单个代理"""
-    import time
-    from curl_cffi import requests as cffi_requests
-
     with get_db() as db:
         proxy = crud.get_proxy_by_id(db, proxy_id)
         if not proxy:
             raise HTTPException(status_code=404, detail="代理不存在")
 
-        proxy_url = proxy.proxy_url
-        test_url = "https://api.ipify.org?format=json"
-        start_time = time.time()
-
-        try:
-            proxies = {
-                "http": proxy_url,
-                "https": proxy_url
-            }
-
-            response = cffi_requests.get(
-                test_url,
-                proxies=proxies,
-                timeout=3,
-                impersonate="chrome110"
-            )
-
-            elapsed_time = time.time() - start_time
-
-            if response.status_code == 200:
-                ip_info = response.json()
-                return {
-                    "success": True,
-                    "ip": ip_info.get("ip", ""),
-                    "response_time": round(elapsed_time * 1000),
-                    "message": f"代理连接成功，出口 IP: {ip_info.get('ip', 'unknown')}"
-                }
-            else:
-                return {
-                    "success": False,
-                    "message": f"代理返回错误状态码: {response.status_code}"
-                }
-
-        except Exception as e:
-            return {
-                "success": False,
-                "message": f"代理连接失败: {str(e)}"
-            }
+        return _probe_proxy_connectivity(proxy.proxy_url, timeout_seconds=5)
 
 
 @router.post("/proxies/test-all")
 async def test_all_proxies():
     """测试所有启用的代理"""
-    import time
-    from curl_cffi import requests as cffi_requests
-
     with get_db() as db:
         proxies = crud.get_enabled_proxies(db)
 
         results = []
         for proxy in proxies:
-            proxy_url = proxy.proxy_url
-            test_url = "https://api.ipify.org?format=json"
-            start_time = time.time()
-
-            try:
-                proxies_dict = {
-                    "http": proxy_url,
-                    "https": proxy_url
-                }
-
-                response = cffi_requests.get(
-                    test_url,
-                    proxies=proxies_dict,
-                    timeout=3,
-                    impersonate="chrome110"
-                )
-
-                elapsed_time = time.time() - start_time
-
-                if response.status_code == 200:
-                    ip_info = response.json()
-                    results.append({
-                        "id": proxy.id,
-                        "name": proxy.name,
-                        "success": True,
-                        "ip": ip_info.get("ip", ""),
-                        "response_time": round(elapsed_time * 1000)
-                    })
-                else:
-                    results.append({
-                        "id": proxy.id,
-                        "name": proxy.name,
-                        "success": False,
-                        "message": f"状态码: {response.status_code}"
-                    })
-
-            except Exception as e:
-                results.append({
-                    "id": proxy.id,
-                    "name": proxy.name,
-                    "success": False,
-                    "message": str(e)
-                })
+            result = _probe_proxy_connectivity(proxy.proxy_url, timeout_seconds=5)
+            results.append({
+                "id": proxy.id,
+                "name": proxy.name,
+                "success": bool(result.get("success")),
+                "response_time": result.get("response_time"),
+                "target": result.get("target"),
+                "status_code": result.get("status_code"),
+                "message": result.get("message"),
+            })
 
         success_count = sum(1 for r in results if r["success"])
         return {

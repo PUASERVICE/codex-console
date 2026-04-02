@@ -7,10 +7,10 @@ import logging
 import socket
 import sys
 from pathlib import Path
+import os
 
 # 添加项目根目录到 Python 路径
 # PyInstaller 打包后 __file__ 在临时解压目录，需要用 sys.executable 所在目录作为数据目录
-import os
 if getattr(sys, 'frozen', False):
     # 打包后：使用可执行文件所在目录
     project_root = Path(sys.executable).parent
@@ -113,10 +113,11 @@ def setup_application():
     return settings
 
 
-def start_webui():
+def start_webui(force_reload: bool = False):
     """启动 Web UI"""
     # 设置应用程序
     settings = setup_application()
+    enable_reload = bool(force_reload or settings.debug)
 
     # 导入 FastAPI 应用（延迟导入以避免循环依赖）
     from src.web.app import app
@@ -141,14 +142,15 @@ def start_webui():
         "app": "src.web.app:app",
         "host": bind_host,
         "port": selected_port,
-        "reload": settings.debug,
-        "log_level": "info" if settings.debug else "warning",
-        "access_log": settings.debug,
+        "reload": enable_reload,
+        "log_level": "info" if enable_reload else "warning",
+        "access_log": enable_reload,
         "ws": "websockets",
     }
 
     logger.info(f"Web UI 已就位，请走这边: http://{bind_host}:{selected_port}")
     logger.info(f"调试模式: {settings.debug}")
+    logger.info(f"热重载模式: {enable_reload}")
 
     # 启动服务器
     uvicorn.run(**uvicorn_config)
@@ -157,8 +159,6 @@ def start_webui():
 def main():
     """主函数"""
     import argparse
-    import os
-
     parser = argparse.ArgumentParser(description="OpenAI/Codex CLI 自动注册系统 Web UI")
     parser.add_argument("--host", help="监听主机 (也可通过 WEBUI_HOST 环境变量设置)")
     parser.add_argument("--port", type=int, help="监听端口 (也可通过 WEBUI_PORT 环境变量设置)")
@@ -198,7 +198,7 @@ def main():
         update_settings(**updates)
 
     # 启动 Web UI
-    start_webui()
+    start_webui(force_reload=args.reload)
 
 
 if __name__ == "__main__":
