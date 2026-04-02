@@ -118,6 +118,7 @@ def start_webui(force_reload: bool = False):
     # 设置应用程序
     settings = setup_application()
     enable_reload = bool(force_reload or settings.debug)
+    os.environ["WEBUI_HOT_RELOAD_ENABLED"] = "1" if enable_reload else "0"
 
     # 导入 FastAPI 应用（延迟导入以避免循环依赖）
     from src.web.app import app

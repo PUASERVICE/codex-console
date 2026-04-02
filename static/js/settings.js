@@ -899,7 +899,14 @@ function renderProxies(proxies) {
         <tr data-proxy-id="${proxy.id}">
             <td>${proxy.id}</td>
             <td>${escapeHtml(proxy.name)}</td>
-            <td><span class="badge">${proxy.type.toUpperCase()}</span></td>
+            <td>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                    <span class="badge">${proxy.type.toUpperCase()}</span>
+                    <span class="badge ${proxy.lsid_enabled ? 'badge-success' : 'badge-secondary'}">
+                        ${proxy.lsid_enabled ? 'Lsid随机' : 'Lsid关闭'}
+                    </span>
+                </div>
+            </td>
             <td><code>${escapeHtml(proxy.host)}:${proxy.port}</code></td>
             <td>
                 ${proxy.is_default
@@ -916,6 +923,7 @@ function renderProxies(proxies) {
                         <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();toggleSettingsMoreMenu(this)">更多</button>
                         <div class="dropdown-menu" style="min-width:80px;">
                             <a href="#" class="dropdown-item" onclick="event.preventDefault();closeSettingsMoreMenu(this);testProxyItem(${proxy.id})">测试</a>
+                            <a href="#" class="dropdown-item" onclick="event.preventDefault();closeSettingsMoreMenu(this);toggleProxyLsid(${proxy.id}, ${!proxy.lsid_enabled})">${proxy.lsid_enabled ? '关闭Lsid' : '启用Lsid'}</a>
                             <a href="#" class="dropdown-item" onclick="event.preventDefault();closeSettingsMoreMenu(this);toggleProxyItem(${proxy.id}, ${!proxy.enabled})">${proxy.enabled ? '禁用' : '启用'}</a>
                             ${!proxy.is_default ? `<a href="#" class="dropdown-item" onclick="event.preventDefault();closeSettingsMoreMenu(this);handleSetProxyDefault(${proxy.id})">设为默认</a>` : ''}
                         </div>
@@ -1072,12 +1080,13 @@ async function handleSaveProxyItem(e) {
     };
 
     try {
+        let result;
         if (proxyId) {
-            await api.patch(`/settings/proxies/${proxyId}`, data);
-            toast.success('代理已更新');
+            result = await api.patch(`/settings/proxies/${proxyId}`, data);
+            toast.success(result?.proxy?.lsid_enabled ? '代理已更新，随机 Lsid 已启用' : '代理已更新，随机 Lsid 已关闭');
         } else {
-            await api.post('/settings/proxies', data);
-            toast.success('代理已添加');
+            result = await api.post('/settings/proxies', data);
+            toast.success(result?.proxy?.lsid_enabled ? '代理已添加，随机 Lsid 已启用' : '代理已添加');
         }
         closeProxyModal();
         loadProxies();
@@ -1119,6 +1128,18 @@ async function toggleProxyItem(id, enabled) {
         loadProxies();
     } catch (error) {
         toast.error('操作失败: ' + error.message);
+    }
+}
+
+async function toggleProxyLsid(id, enabled) {
+    try {
+        const result = await api.patch(`/settings/proxies/${id}`, {
+            lsid_enabled: enabled,
+        });
+        toast.success(result?.proxy?.lsid_enabled ? '随机 Lsid 已启用' : '随机 Lsid 已关闭');
+        loadProxies();
+    } catch (error) {
+        toast.error('切换失败: ' + error.message);
     }
 }
 

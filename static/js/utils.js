@@ -835,13 +835,13 @@ document.addEventListener('DOMContentLoaded', () => {
             event.preventDefault();
             if (button.disabled) return;
             const confirmed = typeof window.confirm === 'function'
-                ? await window.confirm('将通过热重载重启当前 WebUI，是否继续？', '重启 WebUI')
+                ? await window.confirm('将重启当前 WebUI 并重新载入最新配置，是否继续？', '重启 WebUI')
                 : true;
             if (!confirmed) return;
             loading.show(button, '重启中...');
             try {
                 const result = await api.post('/settings/webui/restart', {});
-                toast.success(result?.message || 'WebUI 热重载重启已触发');
+                toast.success(result?.message || 'WebUI 重启已触发');
                 button.disabled = true;
                 window.setTimeout(() => {
                     window.location.reload();

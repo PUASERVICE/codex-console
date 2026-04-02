@@ -4,6 +4,7 @@
 
 import logging
 import os
+import sys
 from typing import Optional, Any, Dict, List, Tuple, Set
 from pathlib import Path
 from urllib.parse import urlparse
@@ -106,6 +107,28 @@ def _write_reload_trigger() -> str:
     )
     logger.warning("收到 Web UI 热重载请求，已写入触发文件: %s", RELOAD_TRIGGER_PATH)
     return token
+
+
+def _is_hot_reload_enabled() -> bool:
+    return str(os.environ.get("WEBUI_HOT_RELOAD_ENABLED", "")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _build_restart_argv() -> List[str]:
+    original_argv = [str(arg) for arg in getattr(sys, "orig_argv", []) if str(arg)]
+    if original_argv:
+        return original_argv
+    if getattr(sys, "frozen", False):
+        return [str(sys.executable), *[str(arg) for arg in sys.argv[1:]]]
+    return [str(sys.executable), *[str(arg) for arg in sys.argv]]
+
+
+def _restart_current_process(delay_seconds: float = 0.5) -> None:
+    import time
+
+    argv = _build_restart_argv()
+    logger.warning("收到 Web UI 进程重启请求，将使用原始命令重新拉起: %s", argv)
+    time.sleep(max(0.0, float(delay_seconds or 0.0)))
+    os.execv(argv[0], argv)
 
 
 def _verify_auto_quick_refresh_settings_persisted(
@@ -404,9 +427,21 @@ async def update_webui_settings(request: WebUISettings):
 
 @router.post("/webui/restart")
 async def restart_webui(background_tasks: BackgroundTasks):
-    """通过热重载重启 Web UI。"""
-    background_tasks.add_task(_write_reload_trigger)
-    return {"success": True, "message": "已触发 Web UI 热重载重启，页面将在稍后自动刷新"}
+    """重启 Web UI，并在启动后重新载入最新配置。"""
+    if _is_hot_reload_enabled():
+        background_tasks.add_task(_write_reload_trigger)
+        return {
+            "success": True,
+            "mode": "hot_reload",
+            "message": "已触发 Web UI 热重载，页面将在稍后自动刷新并重新载入最新配置",
+        }
+
+    background_tasks.add_task(_restart_current_process)
+    return {
+        "success": True,
+        "mode": "process_restart",
+        "message": "已触发 Web UI 进程重启，页面将在稍后自动刷新并重新载入最新配置",
+    }
 
 
 @router.get("/database")

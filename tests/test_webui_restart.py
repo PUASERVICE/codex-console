@@ -24,7 +24,7 @@ def test_write_reload_trigger_creates_parent_directory(tmp_path, monkeypatch):
     assert target.exists()
 
 
-def test_restart_webui_schedules_reload():
+def test_restart_webui_schedules_hot_reload(monkeypatch):
     class DummyBackgroundTasks:
         def __init__(self):
             self.tasks = []
@@ -33,11 +33,34 @@ def test_restart_webui_schedules_reload():
             self.tasks.append((fn, args, kwargs))
 
     async def runner():
+        monkeypatch.setenv("WEBUI_HOT_RELOAD_ENABLED", "1")
         tasks = DummyBackgroundTasks()
         result = await settings_routes.restart_webui(tasks)
         assert result["success"] is True
-        assert "自动刷新" in result["message"]
+        assert result["mode"] == "hot_reload"
+        assert "热重载" in result["message"]
         assert tasks.tasks
         assert tasks.tasks[0][0] is settings_routes._write_reload_trigger
+
+    asyncio.run(runner())
+
+
+def test_restart_webui_schedules_process_restart(monkeypatch):
+    class DummyBackgroundTasks:
+        def __init__(self):
+            self.tasks = []
+
+        def add_task(self, fn, *args, **kwargs):
+            self.tasks.append((fn, args, kwargs))
+
+    async def runner():
+        monkeypatch.setenv("WEBUI_HOT_RELOAD_ENABLED", "0")
+        tasks = DummyBackgroundTasks()
+        result = await settings_routes.restart_webui(tasks)
+        assert result["success"] is True
+        assert result["mode"] == "process_restart"
+        assert "进程重启" in result["message"]
+        assert tasks.tasks
+        assert tasks.tasks[0][0] is settings_routes._restart_current_process
 
     asyncio.run(runner())
