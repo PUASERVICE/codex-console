@@ -734,6 +734,7 @@ def create_proxy(
     port: int,
     username: Optional[str] = None,
     password: Optional[str] = None,
+    lsid_enabled: bool = False,
     enabled: bool = True,
     priority: int = 0
 ) -> Proxy:
@@ -745,6 +746,7 @@ def create_proxy(
         port=port,
         username=username,
         password=password,
+        lsid_enabled=lsid_enabled,
         enabled=enabled,
         priority=priority
     )

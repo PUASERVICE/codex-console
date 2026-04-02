@@ -1,6 +1,7 @@
 from src.config.settings import Settings
 from src.database.models import Proxy
 from src.core.dynamic_proxy import fetch_dynamic_proxy
+from src import proxy_utils
 from src.web.routes import settings as settings_routes
 
 
@@ -24,6 +25,56 @@ def test_proxy_model_url_upgrades_socks5_to_socks5h():
     )
 
     assert proxy.proxy_url == "socks5h://127.0.0.1:1080"
+
+
+def test_proxy_model_url_injects_lsid_only_when_enabled(monkeypatch):
+    monkeypatch.setattr(proxy_utils, "generate_proxy_lsid_token", lambda: "993523438")
+    proxy = Proxy(
+        name="demo",
+        type="socks5",
+        host="prem.us.iprocket.io",
+        port=9595,
+        username="com51844261-res-ROW-Lsid-TTL-600",
+        password="HyDC8U451R8EWCt",
+        lsid_enabled=True,
+    )
+
+    assert proxy.proxy_url == (
+        "socks5h://com51844261-res-ROW-Lsid-993523438-TTL-600:"
+        "HyDC8U451R8EWCt@prem.us.iprocket.io:9595"
+    )
+
+
+def test_settings_proxy_url_keeps_lsid_placeholder_when_switch_is_not_available(monkeypatch):
+    monkeypatch.setattr(proxy_utils, "generate_proxy_lsid_token", lambda: "993523438")
+    settings = Settings(
+        proxy_enabled=True,
+        proxy_type="socks5",
+        proxy_host="prem.us.iprocket.io",
+        proxy_port=9595,
+        proxy_username="com51844261-res-ROW-Lsid-TTL-600",
+        proxy_password="HyDC8U451R8EWCt",
+    )
+
+    assert settings.proxy_url == (
+        "socks5h://com51844261-res-ROW-Lsid-TTL-600:"
+        "HyDC8U451R8EWCt@prem.us.iprocket.io:9595"
+    )
+
+
+def test_proxy_model_url_keeps_generic_username_unchanged(monkeypatch):
+    monkeypatch.setattr(proxy_utils, "generate_proxy_lsid_token", lambda: "993523438")
+    proxy = Proxy(
+        name="demo",
+        type="socks5",
+        host="127.0.0.1",
+        port=1080,
+        username="plain-user",
+        password="secret",
+        lsid_enabled=True,
+    )
+
+    assert proxy.proxy_url == "socks5h://plain-user:secret@127.0.0.1:1080"
 
 
 def test_normalize_proxy_type_maps_socks5h_back_to_socks5():

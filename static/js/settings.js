@@ -964,6 +964,9 @@ function openProxyModal(proxy = null) {
         document.getElementById('proxy-item-port').value = proxy.port || '';
         document.getElementById('proxy-item-username').value = proxy.username || '';
         document.getElementById('proxy-item-password').value = '';
+        document.getElementById('proxy-item-lsid-enabled').checked = Boolean(proxy.lsid_enabled);
+    } else {
+        document.getElementById('proxy-item-lsid-enabled').checked = false;
     }
 
     elements.addProxyModal.classList.add('active');
@@ -1064,6 +1067,7 @@ async function handleSaveProxyItem(e) {
         port: parseInt(document.getElementById('proxy-item-port').value),
         username: document.getElementById('proxy-item-username').value || null,
         password: document.getElementById('proxy-item-password').value || null,
+        lsid_enabled: Boolean(document.getElementById('proxy-item-lsid-enabled').checked),
         enabled: true
     };
 

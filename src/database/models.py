@@ -400,6 +400,7 @@ class Proxy(Base):
     port = Column(Integer, nullable=False)
     username = Column(String(100))
     password = Column(String(255))
+    lsid_enabled = Column(Boolean, default=False)
     enabled = Column(Boolean, default=True)
     is_default = Column(Boolean, default=False)  # 是否为默认代理
     priority = Column(Integer, default=0)  # 优先级（保留字段）
@@ -416,6 +417,7 @@ class Proxy(Base):
             'host': self.host,
             'port': self.port,
             'username': self.username,
+            'lsid_enabled': bool(self.lsid_enabled),
             'enabled': self.enabled,
             'is_default': self.is_default or False,
             'priority': self.priority,
@@ -438,5 +440,6 @@ class Proxy(Base):
             self.port,
             self.username,
             self.password,
+            enable_lsid=bool(self.lsid_enabled),
         )
         return proxy_url or f"http://{self.host}:{self.port}"

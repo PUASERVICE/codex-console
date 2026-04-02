@@ -210,6 +210,13 @@
                                     <input type="password" id="proxy-item-password" name="password" autocomplete="new-password">
                                 </div>
                             </div>
+                            <div class="form-group">
+                                <label style="display:flex;gap:8px;align-items:center;cursor:pointer;">
+                                    <input type="checkbox" id="proxy-item-lsid-enabled" name="lsid_enabled">
+                                    <span>启用 Lsid 随机后缀</span>
+                                </label>
+                                <small style="color: var(--text-muted);">开启后，请求时会将用户名中的 `Lsid` 片段替换为随机 9 位编号，首位为 8 或 9。</small>
+                            </div>
                             <div class="form-actions">
                                 <button type="button" class="btn btn-secondary" id="cancel-proxy-btn">取消</button>
                                 <button type="submit" class="btn btn-primary">💾 保存</button>
@@ -669,7 +676,6 @@ user:pass@127.0.0.1:7890
     <script src="/static/js/settings.js?v={{ static_version }}"></script>
 </body>
 </html>
-
 
 
 

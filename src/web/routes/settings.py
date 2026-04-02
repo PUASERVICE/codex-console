@@ -711,6 +711,7 @@ class ProxyCreateRequest(BaseModel):
     port: int
     username: Optional[str] = None
     password: Optional[str] = None
+    lsid_enabled: bool = False
     enabled: bool = True
     priority: int = 0
 
@@ -723,6 +724,7 @@ class ProxyUpdateRequest(BaseModel):
     port: Optional[int] = None
     username: Optional[str] = None
     password: Optional[str] = None
+    lsid_enabled: Optional[bool] = None
     enabled: Optional[bool] = None
     priority: Optional[int] = None
 
@@ -981,6 +983,7 @@ async def create_proxy_item(request: ProxyCreateRequest):
             port=request.port,
             username=request.username,
             password=request.password,
+            lsid_enabled=request.lsid_enabled,
             enabled=request.enabled,
             priority=request.priority
         )
@@ -1014,6 +1017,8 @@ async def update_proxy_item(proxy_id: int, request: ProxyUpdateRequest):
             update_data["username"] = request.username
         if request.password is not None:
             update_data["password"] = request.password
+        if request.lsid_enabled is not None:
+            update_data["lsid_enabled"] = request.lsid_enabled
         if request.enabled is not None:
             update_data["enabled"] = request.enabled
         if request.priority is not None:

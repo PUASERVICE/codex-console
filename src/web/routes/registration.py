@@ -24,6 +24,7 @@ from ...database.models import RegistrationTask, Proxy
 from ...core.register import RegistrationEngine, RegistrationResult
 from ...core.registration_failures import classify_registration_failure
 from ...core.registration_retry_policy import build_retry_action
+from ...proxy_utils import upgrade_proxy_url_for_requests
 from ..registration_task_scheduler import should_run_deferred_task
 from ...services import EmailServiceFactory, EmailServiceType
 from ...config.settings import get_settings
@@ -784,13 +785,16 @@ def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: 
             if not openai_proxy_url:
                 openai_proxy_url, proxy_id = get_proxy_for_registration(db)
                 if openai_proxy_url:
-                    logger.info(f"任务 {task_uuid} 使用 OpenAI 代理: {openai_proxy_url[:50]}...")
                     settings_snapshot = get_settings()
                     dynamic_proxy_used = (
                         proxy_id is None
                         and bool(getattr(settings_snapshot, "proxy_dynamic_enabled", False))
                         and bool(str(getattr(settings_snapshot, "proxy_dynamic_api_url", "") or "").strip())
                     )
+
+            if openai_proxy_url:
+                openai_proxy_url = upgrade_proxy_url_for_requests(openai_proxy_url) or openai_proxy_url
+                logger.info(f"任务 {task_uuid} 使用 OpenAI 代理: {openai_proxy_url[:50]}...")
 
             # 更新任务的代理记录
             crud.update_registration_task(db, task_uuid, proxy=openai_proxy_url)
