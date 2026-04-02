@@ -157,6 +157,33 @@ def test_run_registration_task_skips_deferred_task_before_next_retry(monkeypatch
         assert updates[-1][1] == "deferred"
 
 
+def test_gate_task_execution_does_not_block_non_deferred_task():
+    class DummyTask:
+        status = "running"
+        next_retry_at = datetime.utcnow().replace(microsecond=0) + timedelta(seconds=60)
+        error_message = "任务尚未到达下一次重试时间"
+
+    class DummyDbContext:
+        def __enter__(self):
+            return object()
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    original_get_db = registration_routes.get_db
+    original_get_task = registration_routes.crud.get_registration_task_by_uuid
+    try:
+        registration_routes.get_db = lambda: DummyDbContext()
+        registration_routes.crud.get_registration_task_by_uuid = lambda db, task_uuid: DummyTask()
+        can_run, outcome = registration_routes._gate_task_execution_by_retry_window("task-running")
+    finally:
+        registration_routes.get_db = original_get_db
+        registration_routes.crud.get_registration_task_by_uuid = original_get_task
+
+    assert can_run is True
+    assert outcome is None
+
+
 def test_task_to_response_includes_retry_state(monkeypatch):
     class DummyTask:
         id = 1
